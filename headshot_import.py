@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import json
 import dotenv
 import pathlib
 import airtable
@@ -52,6 +53,10 @@ for e in root.findall('./channel/item'):
     elif post_type == 'attachment' and '_wp_attached_file' in post_meta:
         attachid_filenames[post_id] = post_meta['_wp_attached_file'][0]
 
+
+# create a mapping of names to urls using this github project as a 
+# source of urls for images (airtable api needs to be given a url)
+
 wp_uploads = pathlib.Path('wordpress/mith.umd.edu/wp-content/uploads/')
 new_wp_uploads = pathlib.Path('wp-uploads')
 name_thumburls = {}
@@ -65,13 +70,15 @@ for name, attach_id in name_attachids.items():
         thumb.parent.mkdir(parents=True)
 
     copyfile(orig, thumb)
-    url = 'https://raw.githubusercontent.com/edsu/mith-static-munging/master/' + relpath 
+    url = 'https://raw.githubusercontent.com/edsu/mith-static-munging/master/wp-uploads/' + relpath 
     name_thumburls[name] = url
 
 # update airtable by posting the url for the image
 
 for p in people.get_all():
+    rec_id = p['id']
     name = p['fields']['id']
     if name in name_thumburls:
+        print(name)
         thumb_url = name_thumburls[name]
-        print(name, thumb_url)
+        people.update(rec_id, {'headshot': [{'url': thumb_url}]})
