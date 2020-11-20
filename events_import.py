@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 Loading events markdown into Airtable.
@@ -6,208 +6,101 @@ Loading events markdown into Airtable.
 
 import os
 import re
-import json
+import bs4
 import bleach
 import dotenv
-import shutil
+import wayback
 import airtable
-import requests
 import pypandoc
-import fusionbuilder
-import xml.etree.ElementTree as etree
+import requests_html
 
-from pathlib import Path
-
-# map of file extensions to typed directories
-
-dir_map = {
-    ".csv": "data",
-    ".dmg": "data",
-    ".gif": "images",
-    ".jpeg": "images",
-    ".jpg": "images",
-    ".json": "data",
-    ".key": "docs",
-    ".m4v": "video",
-    ".mp3": "audio",
-    ".pdf": "docs",
-    ".png": "images",
-    ".ppt": "docs",
-    ".pptx": "docs",
-    ".xml": "docs",
-    ".zip": "data"
-}
-
-site_backup = Path('wordpress/mith.umd.edu/wp-content/uploads/')
-
-def rewrite_upload(url):
-    new_url = url
-    m = re.match(r'https://mith.umd.edu/wp-content/uploads/(.+)', url)
-    if m:
-        path = Path(m.group(1))
-        ext = path.suffix.lower()
-
-        new_path = Path(dir_map[ext]) / path.as_posix().replace('/', '-')
-        site_path = Path('site') / new_path
-
-        if not site_path.parent.exists():
-            site_path.parent.mkdir()
-
-        if not site_path.exists():
-            shutil.copyfile(site_backup / path, site_path)
-
-        new_url = 'https://mith.umd.edu/' + new_path.as_posix()
-
-    return new_url
-
-def rewrite_uploads(text):
-    return re.sub(
-        r'"https://mith.umd.edu/wp-content/uploads/(.+?)"', 
-        lambda m: '"' + rewrite_upload(m.group(1)) + '"',
-        text 
-    )
-
-# airtable credentials
-
+# get the airtable credentials
 dotenv.load_dotenv()
 key = os.environ.get('AIRTABLE_KEY')
+events = airtable.Airtable('appTv9J1zxqaNgBHi', 'Events', key)
 
-# parse the wordpress export and create a few mappings of things 
+# a web client
+http = requests_html.HTMLSession()
 
-content = {}
-slug_ids = {}
-attachments = {}
+# a function to return the first wayback archive for a url
 
-tree = etree.parse('wp-mith.xml')
-root = tree.getroot()
+wb = wayback.WaybackClient()
+def wayback_search(url):
+    try:
+        memento = next(wb.search(url))
+        resp = http.get(memento.raw_url)
+        return resp
+    except StopIteration:
+        return None
 
-ns = {
-    "wp": "http://wordpress.org/export/1.2/",
-    "content": "http://purl.org/rss/1.0/modules/content/"
-}
+# a function to try to get the abstract for a slug as markdown
+# it will look in a variety of places in both our archive and the Internet
+# Archive
 
-items = {}
-attachments = {}
+def get_abstract(slug):
 
-for e in root.findall('./channel/item'):
-    post_name = e.find('wp:post_name', ns).text
-    post_id = e.find('wp:post_id', ns).text
-    post_type = e.find('wp:post_type', ns).text
-    post_content = e.find('content:encoded', ns).text
+    # look for the digital dialogue in MITH archive
+    url = 'https://archive.mith.umd.edu/mith-2020/dialogues/' + slug + '/'
+    resp = http.get(url)
+    abstract = resp.html.find('.abstract', first=True)
 
-    post_meta = {}
-    for pm in e.findall('wp:postmeta', ns):
-        k = pm.find('wp:meta_key', ns).text
-        v = pm.find('wp:meta_value', ns).text
-        if v is None:
-            continue
-        if k in post_meta:
-            post_meta[k].append(v)
-        else:
-            post_meta[k] = [v]
+    # look for a research path in MITH archive
+    if not abstract:
+        url = 'https://archive.mith.umd.edu/mith-2020/research/' + slug + '/'
+        resp = http.get(url)
+        abstract = resp.html.find('.post', first=True)
 
-    items[post_id] = {
-        "id": post_id,
-        "name": post_name,
-        "content": post_content,
-        "meta": post_meta,
-        "type": post_type
-    }
+    # look for the blog post in MITH archive
+    if not abstract:
+        url = 'https://archive.mith.umd.edu/mith-2020/' + slug + '/'
+        resp = http.get(url)
+        abstract = resp.html.find('.post', first=True)
 
-    # extra look up by slug for these post types
-    if post_type in ["mith_dialogue", "mith_research", "post"]:
-        items[post_name] = items[post_id]
+    # look for the digital dialogue at the Internet Archive
+    if not abstract:
+        url = 'https://mith.umd.edu/dialogues/' + slug + '/'
+        resp = wayback_search(url)
+        if resp:
+            print('wb-dd', url)
+            abstract = resp.html.find('.abstract', first=True)
 
-    # attachments get an extra metadata value and a mapping
-    # from the parent item id to the item id so they can be 
-    # looked up later
-    if post_type == "attachment":
-        attachment_url = e.find('wp:attachment_url', ns).text
-        items[post_id]['attachment_url'] = attachment_url
+    # look for the research post at the Internet Archive
+    if not abstract:
+        url = 'https://mith.umd.edu/research/' + slug + '/'
+        resp = wayback_search(url)
+        if resp:
+            print('wb-research', url)
+            abstract = resp.html.find('.post', first=True)
 
-        parent_id = e.find('wp:post_parent', ns).text
-        if parent_id in attachments:
-            attachments[parent_id].append(post_id)
-        else:
-            attachments[parent_id] = [post_id]
+    # look for the blog post at the Internet Archive
+    if not abstract:
+        url = 'https://mith.umd.edu/' + slug + '/'
+        resp = wayback_search(url)
+        if resp:
+            print('wb-blog', url)
+            abstract = resp.html.find('.post', first=True)
 
-def id2link(id):
-    """
-    Convert a post_id to the url for an attachment. And save the file from
-    the archive.
-    """
-    if id in items and items[id]['attachment_url']:
-        url = items[id]['attachment_url']
-        url = rewrite_upload(url)
-        return url
-    return id
+    if not abstract:
+        return None
 
-# get the events table
+    html = abstract.html
+    html = html.replace('_x000D_', ' ')
+    html = html.replace('\n', ' ')
+    html = re.sub('\xa0', ' ', html)
+    html = re.sub('  +', ' ', html)
+    html = bleach.clean(html, tags=['b', 'em', 'a', 'strong', 'i'], strip=True)
 
-events_table = airtable.Airtable('appTv9J1zxqaNgBHi', 'Events', key)
-events = events_table.get_all()
+    md = pypandoc.convert_text(html, 'md', format='html')
+    return md
 
-# examine each event and upload the markdown as the description
-
-for e in events:
-    id = e['id']
+for e in events.get_all():
+    rec_id = e['id']
     slug = e['fields'].get('ID')
+    md = get_abstract(slug)
 
-    if slug in items:
-        item = items[slug]
-        html = item['content']
+    if md:
+        print('+ {}'.format(slug))
+        events.update(rec_id, {"description": md})
+    else:
+        print('- {}'.format(slug))
 
-        root, html = fusionbuilder.parse(html)
-
-        html = html.replace('_x000D_', ' ')
-        html = html.replace('\n', ' ')
-        html = re.sub('\xa0', ' ', html)
-        html = re.sub('  +', ' ', html)
-        html = bleach.clean(html, tags=['b', 'em', 'a', 'strong', 'i'], strip=True)
-
-        md = pypandoc.convert_text(html, 'md', format='html')
-
-        rec = {
-            'description_new': md,
-        }
-
-
-        for key, values in item['meta'].items():
-            if key == '_thumbnail_id':
-                rec['image_link'] = id2link(values[0])
-
-        # xxx: bring this back if we need to process all the files
-        # and remove the three lines above 
-
-        '''
-
-        # parent attachments
-
-        for attach_id in attachments.get(item['id'], []):
-            attach = items[attach_id]
-            url = rewrite_upload(attach['attachment_url'])
-            if 'mith.umd.edu/images/' in url:
-                rec['image_link'] = url
-            else:
-                rec['file_link'].append(url)
-
-        # also look for files in metadata, not all are linked via parent
-
-        for key, values in item['meta'].items():
-            if key == '_thumbnail_id':
-                rec['image_link'].extend(map(id2link, values))
-            elif re.match('dialogue_files_\d+_dialogue_file_obj', key):
-                rec['file_link'].extend(map(id2link, values))
-            elif re.match('dialogue_files_\d+_dialogue_file_url', key):
-                rec['file_link'].extend(map(rewrite_upload, values))
-
-        # make them unique
-
-        rec['image_link'] = list(set(rec['image_link']))
-
-        rec['file_link'] = list(set(rec['file_link']))
-        '''
-
-        print(rec)
-
-        events_table.update(id, rec)
