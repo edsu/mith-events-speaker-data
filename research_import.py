@@ -88,29 +88,21 @@ def get_description(slug):
 
     return img, md
 
-def github_url(url):
-    if url is None:
-        return None
-    path = urllib.parse.urlparse(url).path.lstrip('/')
-    src = pathlib.Path('wordpress/mith.umd.edu/wp-content/uploads/') / path
-    dst = pathlib.Path('uploads') / path
-    copyfile(src, dst)
-
-    gh_url = 'https://raw.githubusercontent.com/edsu/mith-static-munging/master/uploads/' + path 
-    resp = requests.get(gh_url)
-    if resp.status_code == 200:
-        return gh_url
-    else:
-        return None
-
 for p in projects.get_all():
     rec_id = p['id']
     slug = p['fields'].get('id')
     img, md = get_description(slug)
-    github_url = github_url(img)
 
     if md:
-        print('+ {} - {}'.format(slug, img, github_url))
-        #projects.update(rec_id, {"description": md})
+        projects.update(rec_id, {"description": md})
+        print('+ {}'.format(slug))
     else:
-        print('- {}'.format(slug))
+        print('- {}'.format(slug))   
+
+    if img:
+        resp = http.get(img)
+        if resp.status_code == 200:
+            projects.update(rec_id, {"image": [{'url': img}]})
+            print('+ {} {}'.format(slug, img))
+    else:
+        print('- {} {}'.format(slug, img))
