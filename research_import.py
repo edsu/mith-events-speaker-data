@@ -77,14 +77,22 @@ def get_description(slug):
         img = urllib.parse.urljoin(url, img.attrs['src'])
 
     html = description.html
+    open('out/{}.html'.format(slug), 'w').write(html)
+
     html = html.replace('_x000D_', ' ')
     html = html.replace('\n', ' ')
     html = re.sub('\xa0', ' ', html)
     html = re.sub('  +', ' ', html)
-    html = bleach.clean(html, tags=['b', 'em', 'a', 'strong', 'i'], strip=True)
 
+    # remove project metadata since we have it in airtable
+    html = re.sub('<div class="fusion-meta-info">.+$', '', html)
+
+    html = bleach.clean(html, tags=['h1', 'h2', 'h3', 'h4', 'span', 'p', 'ul', 'li', 'b', 'em', 'a', 'strong', 'i'], strip=True)
+    html = re.sub(r'<div>', '<p>', html)
+    html = re.sub(r'</div>', '</p>', html)
+    
     md = pypandoc.convert_text(html, 'md', format='html', extra_args=['--wrap', 'preserve'])
-    md = re.sub(r'\]\s\(', '](', md)
+    open('out/{}.md'.format(slug), 'w').write(md)
 
     return img, md
 
