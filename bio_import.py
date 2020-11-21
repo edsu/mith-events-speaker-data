@@ -10,8 +10,8 @@ import airtable
 
 dotenv.load_dotenv()
 
-base = os.environ['AIRTABLE_BASE']
-key = os.environ['AIRTABLE_KEY']
+base = os.environ['AIRTABLE_PEOPLE_BASE_ID']
+key = os.environ['AIRTABLE_API_KEY']
 table = airtable.Airtable(base, 'Speaker(s)', key)
 
 # create a mapping of names to row ids

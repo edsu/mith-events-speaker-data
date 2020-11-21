@@ -14,8 +14,9 @@ from xml.etree import ElementTree as etree
 # get the airtable credentials
 
 dotenv.load_dotenv()
-key = os.environ.get('AIRTABLE_KEY')
-people = airtable.Airtable('appk2btw36qEO3vFo', 'People', key) 
+key = os.environ.get('AIRTABLE_API_KEY')
+base_id = os.environ.get('AIRTABLE_PEOPLE_BASE_ID')
+people = airtable.Airtable(base_id, 'People', key) 
 
 
 # parse the wordpress xml looking for mith_person headshots
@@ -58,7 +59,7 @@ for e in root.findall('./channel/item'):
 # source of urls for images (airtable api needs to be given a url)
 
 wp_uploads = pathlib.Path('wordpress/mith.umd.edu/wp-content/uploads/')
-new_wp_uploads = pathlib.Path('wp-uploads')
+new_wp_uploads = pathlib.Path('uploads')
 name_thumburls = {}
 
 for name, attach_id in name_attachids.items():

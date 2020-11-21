@@ -16,8 +16,9 @@ import requests_html
 
 # get the airtable credentials
 dotenv.load_dotenv()
-key = os.environ.get('AIRTABLE_KEY')
-events = airtable.Airtable('appTv9J1zxqaNgBHi', 'Events', key)
+key = os.environ.get('AIRTABLE_API_KEY')
+base_id = os.environ.get('AIRTABLE_RESEARCH_BASE_ID')
+events = airtable.Airtable(base_id, 'Events', key)
 
 # a web client
 http = requests_html.HTMLSession()
@@ -81,7 +82,7 @@ def get_abstract(slug):
             abstract = resp.html.find('.post', first=True)
 
     if not abstract:
-        return None
+        return None, None
 
     html = abstract.html
     html = html.replace('_x000D_', ' ')
@@ -90,16 +91,20 @@ def get_abstract(slug):
     html = re.sub('  +', ' ', html)
     html = bleach.clean(html, tags=['b', 'em', 'a', 'strong', 'i'], strip=True)
 
-    md = pypandoc.convert_text(html, 'md', format='html')
-    return md
+    md = pypandoc.convert_text(html, 'md', format='html', extra_args=['--wrap', 'preserve'])
+    md = re.sub(r'\]\s\(', '](', md)
+
+    return html, md
 
 for e in events.get_all():
     rec_id = e['id']
-    slug = e['fields'].get('ID')
-    md = get_abstract(slug)
+    slug = e['fields'].get('id')
+    html, md = get_abstract(slug)
 
     if md:
         print('+ {}'.format(slug))
+        open('out/{}.md'.format(slug), 'w').write(md)
+        open('out/{}.html'.format(slug), 'w').write(html)
         events.update(rec_id, {"description": md})
     else:
         print('- {}'.format(slug))
