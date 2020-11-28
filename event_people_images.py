@@ -52,11 +52,23 @@ for e in root.findall('./channel/item'):
     if '_wp_attached_file' not in post_meta:
         continue
 
-    filename = post_meta['_wp_attached_file'][0]
-    name = normal_name(post_title)
 
+    filename = None
+    for f in post_meta['_wp_attached_file']:
+        if pathlib.Path(f).suffix.lower() in ['.jpg', '.gif', '.png', 'jpeg']:
+            filename = f
+
+    if not filename:
+        continue
+
+    name = normal_name(post_title)
     if name and filename:
         name_images[name] = filename
+
+    alt = post_meta.get('_wp_attachment_image_alt')
+    if alt and alt[0] != None and filename:
+        name_images[normal_name(alt[0])] = filename
+
 
 found = 0
 count = 0
@@ -81,11 +93,11 @@ for person in people:
             dst = pathlib.Path('uploads') / found_image
             if not dst.parent.exists():
                 dst.parent.mkdir(parents=True)
-            shutil.copyfile(src, dst)
-            print('+', name, dst)
-        else:
-            print('-', name)
-
+            if not dst.exists():
+                shutil.copyfile(src, dst)
+            url = 'https://raw.githubusercontent.com/edsu/mith-static-munging/master/uploads/' + found_image 
+            print(name, url)
+            #people_table.update(person['id'], {'headshot': [{'url': url}]
 
 print(found, count, found / count)
 
