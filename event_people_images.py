@@ -97,7 +97,6 @@ for person in people:
                 shutil.copyfile(src, dst)
             url = 'https://raw.githubusercontent.com/edsu/mith-static-munging/master/uploads/' + found_image 
             print(name, url)
-            #people_table.update(person['id'], {'headshot': [{'url': url}]
+            people_table.update(person['id'], {'headshot': [{'url': url}]})
 
-print(found, count, found / count)
 
